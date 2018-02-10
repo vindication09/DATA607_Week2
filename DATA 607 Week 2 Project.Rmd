@@ -1,0 +1,131 @@
+---
+title: "DATA 607 Week 2"
+author: "Vinicio Haro"
+date: "February 9, 2018"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+The goal of this project is to create a shema in MySQL and read the data from that schema into r. We
+are tasked with asking our friends and family to rate movies, picked at random, on a 1 to 5 scale basis.
+
+I used a custom Survey app on facebook that asked friends to rate popular movies on a 1 to 5 scale. I had 17 participants during the 4 day lifespan of the survey. 
+
+The data is fed into MySQL through a self sustaining script. This script can be opened and run in a blank MSQL script to create the schema.
+
+This portion should be run in MySQL Workbench 
+The following link contains the MySQL script that creates and populates the entire schema:
+https://gist.github.com/vindication09/d904e1930647df98f3092158946d9f92
+
+
+Now that the schema has been created, we need to access and read in the schema in r. 
+
+```{r}
+library(RMySQL)
+```
+
+Make the connection to the MySQL instance on your machine.
+The password is left blank. In order to reproduce this study, please supply the password, user, and host name that belongs to your own MySQL instance:
+
+mydb = dbConnect(MySQL(), user='root', password='', dbname='movies', host='localhost')
+```{r, echo=FALSE}
+mydb = dbConnect(MySQL(), user='root', password='bbuser', dbname='movies', host='localhost')
+```
+
+
+Lets see a list that contains the names of the tables currently existing in this schema 
+
+```{r, eval=FALSE, include=FALSE}
+dbListTables(mydb)
+```
+
+We can pick any table in this database and look at the particular fields 
+```{r}
+dbListFields(mydb, 'movieratings')
+```
+
+Lets make a table that has the person id, their name, movie title, and the rating.
+This is exactly what the movieratings table is in the schema, but I would like to highlight 
+the use of dbGetQuery. 
+Let save this table as an r data frame 
+From the Documentation,The function dbGetQuery submits the statement, 
+fetches all output records, and clears the result set.
+More info here: https://www.rdocumentation.org/packages/DBI/versions/0.5-1/topics/dbGetQuery
+
+```{r}
+rs<-dbGetQuery(mydb, 'select 
+a.person_id, 
+a.name, 
+b.movie, 
+c.rating 
+from names a
+left join reviews c 
+on (a.person_id=c.person_id)
+left join movies b
+on (b.movie_id=c.movie_id)
+order by c.rating desc;')
+```
+
+Lets check the contents of our new r dataframe 
+```{r}
+df.movies<-rs
+head(df.movies)
+```
+
+
+I am curious if r prserved the data types defined in the mysql schema. 
+Lets check
+```{r}
+str(df.movies)
+```
+
+
+When I conducted the survey, I noticed that not everyone saw every movie. If there was a movie a participant did not see, they were instructed to skip the question. This means there are missing values for ratings. 
+How many missing values are there? 
+```{r}
+colSums(is.na(df.movies))
+```
+
+The rating column has 31 missing values. 
+
+If I wanted to produce a simple visualization, ggplot2 ignores the missing value. However, since we are being fed data through MySQL, we can use dbGetQuery to subset some data that omits missing values in a where statement. 
+
+```{r}
+ds<-dbGetQuery(mydb,'select movie, rating, count(rating) as freq
+from movieratings
+where rating is not null
+group by movie desc,rating desc
+order by movie desc, rating desc;')
+
+```
+
+What was the purpose of this query? Lets say I wanted to get some insight on the number of times a movie was given a certain rating. The query produces the title of the movie, corresponding to the ratings it recieved, and the number of times it was given that rating. The where clause removes NA rows. I know there are 31 missing ratings, now I want to know about the movies that do have a rating. 
+Check the new subset
+```{r}
+head(ds)
+```
+
+
+What does this subset tell us? Lets look at row 1. It says that the shape of water was given a rating of 5,by 4 participants. 
+
+Is there a better way to visualize this information in one place? 
+```{r}
+library(ggplot2)
+library(RColorBrewer)
+require(scales)
+ggplot(ds, aes(x=rating, y=freq, group = movie, colour = movie)) +
+  geom_point() +
+  geom_point( size=4, shape=21, fill="white")+
+  ggtitle("Frequency of Ratings for Each Movie")+
+  labs( x="Rating (1-5 Scale)", y="Count")+
+  labs(caption="Data Source: Custom Facebook Survey, 17 Participants")+
+  scale_color_brewer(palette="Dark2")
+```
+
+This chart quickly gives a summary of how many times a rating was assigned to a movie. Each movie is shown as a color coded dot. 
+From this chart, we can see that Coco is at the top with 10 participants giving the movie a rating of 5. On the lower end, Saw has recieved the most unfavorable ratings of 1 a total of three times. 
+
+
+
+
